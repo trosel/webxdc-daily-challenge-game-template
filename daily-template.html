@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>Daily Game</title>
+<!--
+  =====================================================================
+  DAILY WEBXDC GAME — TEMPLATE
+  =====================================================================
+  A reusable scaffold for any "one puzzle per day, shared in the chat"
+  webxdc game (à la Wordle). The framework gives you, for free:
+
+    • per-instance random seed (each copy of the app = its own series)
+    • first-opener timezone setup, broadcast + adopted by everyone
+    • timezone-aware day numbering + live countdown to next reset
+    • date navigation back through past days (read-only)
+    • Daily + Overall leaderboards (medals, streaks, trophies, points)
+    • auto-shared results: silent `info` per play, `notify` on overtaking #1
+    • localStorage of your own results; replay-on-boot to rebuild state
+
+  To build YOUR game, edit only the GAME object at the top of <script>.
+  Everything below it is generic and game-agnostic.
+  =====================================================================
+-->
+<style>
+  :root {
+    --bg:#f3f4f6; --card:#fff; --ink:#111827; --muted:#6b7280; --line:#e5e7eb;
+    --accent:#4f46e5; --accent-dark:#3730a3; --good:#16a34a; --bad:#dc2626;
+    --shadow:0 1px 3px rgba(0,0,0,.12),0 1px 2px rgba(0,0,0,.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0b1220; --card:#111a2b; --ink:#e5e7eb; --muted:#9aa4b2; --line:#243149;
+            --shadow:0 1px 3px rgba(0,0,0,.5); }
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; padding:0; }
+  body { background:var(--bg); color:var(--ink); min-height:100vh; padding:12px;
+         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+         display:flex; flex-direction:column; align-items:center; }
+  .app { width:100%; max-width:440px; }
+  header { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+  .brand { display:flex; align-items:baseline; gap:8px; }
+  .brand h1 { margin:0; font-size:24px; letter-spacing:.3px; color:var(--accent); }
+  .brand .puzzle { font-size:13px; color:var(--muted); }
+  .iconbtns { display:flex; gap:6px; }
+  .iconbtn { border:none; background:var(--card); color:var(--ink); width:38px; height:38px;
+             border-radius:10px; font-size:18px; box-shadow:var(--shadow); cursor:pointer; }
+  .iconbtn:active { transform:scale(.94); }
+
+  .datenav { display:flex; align-items:center; justify-content:center; gap:14px; margin-bottom:8px; }
+  .navbtn { background:var(--card); border:none; box-shadow:var(--shadow); color:var(--ink);
+            width:30px; height:30px; border-radius:8px; font-size:18px; cursor:pointer; line-height:1; }
+  .navbtn:active { transform:scale(.92); }
+  .navbtn:disabled { opacity:.3; cursor:default; transform:none; }
+  .datelabel { font-size:14px; font-weight:600; min-width:180px; text-align:center; }
+  .datelabel .today { color:var(--accent-dark); }
+
+  /* live presence (who's here right now, via the realtime channel) */
+  .presence { text-align:center; font-size:12px; color:var(--muted); margin-bottom:8px; }
+  .presence .dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--good); margin-right:6px; vertical-align:middle; }
+
+  /* the GAME renders into here */
+  .stage { background:var(--card); border-radius:16px; box-shadow:var(--shadow); padding:16px; min-height:160px; }
+
+  /* tabs + leaderboards */
+  .tabs { display:flex; margin-top:16px; border-bottom:1px solid var(--line); }
+  .tab { flex:1; background:none; border:none; padding:10px 0; font-size:13px; font-weight:700;
+         letter-spacing:.6px; color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; }
+  .tab.active { color:var(--ink); border-bottom-color:var(--accent); }
+  .pane .card { margin-top:12px; background:var(--card); border-radius:14px; box-shadow:var(--shadow); padding:8px 14px 6px; }
+  .pane .card h2 { margin:4px 0; font-size:14px; display:flex; align-items:center; gap:6px; }
+  .pane .card h2 .count { color:var(--muted); font-weight:400; font-size:12px; }
+
+  .lbrow { display:flex; align-items:center; gap:10px; padding:8px 4px; border-bottom:1px solid var(--line); }
+  .lbrow:last-child { border-bottom:none; }
+  .lbrow .rank { width:26px; text-align:center; font-weight:700; color:var(--muted); font-size:14px; }
+  .lbrow .nm { flex:1; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .lbrow .sc { font-weight:700; font-variant-numeric:tabular-nums; font-size:14px; }
+  .lbrow.me { background:rgba(79,70,229,.12); border-radius:8px; }
+  .lbempty { color:var(--muted); font-size:14px; text-align:center; padding:18px 0; }
+
+  .otable { width:100%; border-collapse:collapse; font-size:13px; }
+  .otable th { text-align:right; font-size:11px; color:var(--muted); font-weight:600; padding:4px 5px;
+               border-bottom:1px solid var(--line); white-space:nowrap; }
+  .otable th.l, .otable td.l { text-align:left; }
+  .otable td { text-align:right; padding:7px 5px; border-bottom:1px solid var(--line); font-variant-numeric:tabular-nums; }
+  .otable tbody tr:last-child td { border-bottom:none; }
+  .otable td.pnm { font-weight:600; max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .otable td.pts { font-weight:700; }
+  .otable tr.me td { background:rgba(79,70,229,.12); }
+  .scorehelp { font-size:11px; color:var(--muted); margin:8px 2px 2px; line-height:1.5; }
+
+  .countdown { text-align:center; font-size:12px; color:var(--muted); margin-top:16px; }
+  .countdown b { color:var(--ink); font-variant-numeric:tabular-nums; }
+
+  /* full-screen overall + setup */
+  .screen { position:fixed; inset:0; background:var(--bg); z-index:70; display:none; overflow-y:auto; padding:12px; }
+  .screen.show { display:block; }
+  .screen-inner { width:100%; max-width:440px; margin:0 auto; }
+
+  .setup { max-width:360px; margin:36px auto 0; text-align:center; padding:0 6px; }
+  .setup h2 { font-size:24px; margin:0 0 10px; }
+  .setup p { font-size:14px; color:var(--muted); line-height:1.55; margin:0 0 4px; }
+  .setlabel { display:block; text-align:left; font-size:11px; letter-spacing:.6px; color:var(--muted); margin:22px 0 6px; font-weight:700; }
+  .setup select { width:100%; padding:12px; font-size:15px; border-radius:10px; border:1px solid var(--line); background:var(--card); color:var(--ink); }
+  .sethint { font-size:12px; color:var(--accent-dark); margin:8px 0 18px; min-height:30px; }
+  .setnote { font-size:12px; margin-top:14px; color:var(--muted); }
+
+  /* generic buttons (handy for game UIs) */
+  .btn { border:none; border-radius:12px; padding:12px 14px; font-size:15px; font-weight:600; cursor:pointer; box-shadow:var(--shadow); }
+  .btn:active { transform:scale(.97); }
+  .btn-primary { background:var(--accent); color:#fff; }
+  .btn-ghost { background:var(--card); color:var(--ink); }
+  .btn:disabled { opacity:.45; cursor:default; transform:none; }
+
+  /* modal */
+  .overlay { position:fixed; inset:0; background:rgba(0,0,0,.5); display:none; align-items:center; justify-content:center; padding:16px; z-index:50; }
+  .overlay.show { display:flex; }
+  .modal { background:var(--card); color:var(--ink); border-radius:16px; width:100%; max-width:400px; max-height:86vh; overflow-y:auto; padding:18px; box-shadow:0 20px 60px rgba(0,0,0,.4); }
+  .modal h2 { margin:0 0 10px; font-size:19px; }
+  .modal p,.modal li { font-size:14px; line-height:1.5; }
+  .closebar { display:flex; justify-content:flex-end; }
+  .x { border:none; background:transparent; font-size:22px; color:var(--muted); cursor:pointer; line-height:1; }
+
+  .toast { position:fixed; bottom:24px; left:50%; transform:translateX(-50%); background:var(--ink); color:var(--bg);
+           padding:10px 16px; border-radius:10px; font-size:13px; opacity:0; transition:opacity .25s; pointer-events:none; z-index:80; }
+  .toast.show { opacity:1; }
+
+  /* ---- demo-game styles (delete when you swap in your own game) ---- */
+  .demo { text-align:center; }
+  .demo .sub { font-size:13px; color:var(--muted); margin-bottom:12px; }
+  .demo .row { display:flex; gap:8px; justify-content:center; }
+  .demo input { width:120px; padding:10px; font-size:18px; text-align:center; border-radius:10px; border:1px solid var(--line); background:var(--bg); color:var(--ink); }
+  .demo .fb { margin-top:12px; font-size:14px; max-height:140px; overflow-y:auto; }
+  .demo .fb > div { padding:3px 0; border-bottom:1px solid var(--line); }
+  .demo .good { color:var(--good); font-weight:700; }
+  .demo .bad { color:var(--bad); font-weight:700; }
+  .demo .big { font-size:34px; font-weight:700; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand"><h1 id="appName">Daily</h1><span class="puzzle" id="puzzleNo">#—</span></div>
+    <div class="iconbtns"><button class="iconbtn" id="btnHelp" title="How to play">❓</button></div>
+  </header>
+
+  <div class="datenav">
+    <button class="navbtn" id="navPrev" title="Previous day">‹</button>
+    <span class="datelabel" id="dateLabel">…</span>
+    <button class="navbtn" id="navNext" title="Next day">›</button>
+  </div>
+
+  <div class="presence" id="presence" style="display:none"></div>
+
+  <div class="stage" id="stage"></div>
+
+  <div class="tabs">
+    <button class="tab active" id="tabDaily">DAILY</button>
+    <button class="tab" id="tabOverall">OVERALL</button>
+  </div>
+
+  <div class="pane" id="paneDaily">
+    <div class="card">
+      <h2><span id="dailyDate">Today</span> <span class="count" id="lbCount"></span></h2>
+      <div id="lb"></div>
+    </div>
+  </div>
+
+  <div class="countdown">Next puzzle in <b id="cd">—</b></div>
+</div>
+
+<!-- Overall standings (full screen) -->
+<div class="screen" id="overallScreen">
+  <div class="screen-inner">
+    <header>
+      <div class="brand"><h1 id="ovName">Daily</h1><span class="puzzle" id="ovPuzzleNo">#—</span></div>
+      <button class="iconbtn" id="ovClose" title="Back">✕</button>
+    </header>
+    <div class="tabs">
+      <button class="tab" id="ovTabDaily">DAILY</button>
+      <button class="tab active">OVERALL</button>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h2>Overall standings</h2>
+      <div id="overall"></div>
+      <div class="scorehelp" id="scoreHelp"></div>
+    </div>
+  </div>
+</div>
+
+<!-- First-opener setup -->
+<div class="screen" id="setupScreen">
+  <div class="screen-inner">
+    <header><div class="brand"><h1 id="setupName">Daily</h1></div></header>
+    <div class="setup">
+      <h2 id="setupTitle">Daily</h2>
+      <p>You're the first to open this. Pick when the daily puzzle resets each day — everyone in the chat will follow your choice.</p>
+      <label class="setlabel" for="tzSelect">RESET AT MIDNIGHT IN</label>
+      <select id="tzSelect"></select>
+      <p class="sethint" id="tzHint"></p>
+      <button class="btn btn-primary" id="startDaily" style="width:100%">Start the daily</button>
+      <p class="setnote">This locks once set, so the leaderboards stay consistent for the whole group.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Help -->
+<div class="overlay" id="ovHelp">
+  <div class="modal">
+    <div class="closebar"><button class="x" data-close>×</button></div>
+    <h2 id="helpTitle">How to play</h2>
+    <div id="helpBody"></div>
+    <p style="color:var(--muted)">Only today's puzzle can be played — use the ‹ › arrows to look back at earlier days and their results. A fresh puzzle drops every day at midnight in the chat's chosen timezone.</p>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ===================================================================
+  // ===== GAME ADAPTER  —  THIS is the only part you edit. ============
+  // ===================================================================
+  // Implement these to turn the framework into your game. A tiny
+  // "guess the number" game is provided so the template runs as-is.
+  //
+  // Result contract (what your game hands back via ctx.submit):
+  //   { score: <number, HIGHER = better, used for ranking>,
+  //     win:   <boolean>,
+  //     display: "<short text shown on the leaderboard, e.g. '3 tries'>" }
+  // ===================================================================
+  var GAME = {
+    name: "Daily Number",        // shown in the title bar / headers
+    verb: "guessed",             // chat line: "Alice guessed #5 — 3 tries"
+
+    helpHTML:
+      "<p>Each day there's a secret number from <b>1–100</b>. Guess it in as few tries as possible.</p>" +
+      "<ul><li>You get hints: too high / too low.</li>" +
+      "<li>Fewer guesses = a better score.</li>" +
+      "<li>You get <b>one official attempt</b> per day.</li></ul>",
+
+    // Build today's puzzle deterministically from a seeded PRNG.
+    // `rng()` returns 0..1; `day` is the absolute day index.
+    makePuzzle: function (rng, day) {
+      return { secret: 1 + Math.floor(rng() * 100) };
+    },
+
+    // Render the puzzle into `root` (already emptied). Use `ctx`:
+    //   ctx.playable  — true only for today, not yet played. Else render read-only.
+    //   ctx.previous  — your saved result for this day, or null.
+    //   ctx.isToday   — whether the viewed day is today.
+    //   ctx.submit(result) — call ONCE when the official attempt finishes.
+    //   ctx.toast(msg)— transient message helper.
+    render: function (root, puzzle, ctx) {
+      if (!ctx.playable) {
+        var p = ctx.previous;
+        root.innerHTML = '<div class="demo">' +
+          (p ? '<div class="big">' + p.display + '</div><div class="sub">' +
+                 (p.win ? "Solved" : "Missed") + " · the number was " + puzzle.secret + '</div>'
+             : '<div class="sub">' + (ctx.isToday ? "Loading…" : "You didn't play this day.") + '</div>') +
+          '</div>';
+        return;
+      }
+      var MAX = 7, tries = 0;
+      root.innerHTML = '<div class="demo">' +
+        '<div class="sub">Guess the number, 1–100 · ' + MAX + ' tries</div>' +
+        '<div class="row"><input id="g" type="number" min="1" max="100" inputmode="numeric" placeholder="?"/>' +
+        '<button class="btn btn-primary" id="go">Guess</button></div>' +
+        '<div class="fb" id="fb"></div></div>';
+      var inp = root.querySelector("#g"), fb = root.querySelector("#fb");
+      function guess() {
+        var v = parseInt(inp.value, 10);
+        if (!(v >= 1 && v <= 100)) { inp.focus(); return; }
+        tries++;
+        if (v === puzzle.secret) {
+          ctx.submit({ score: MAX + 1 - tries, win: true, display: tries + (tries === 1 ? " try" : " tries") });
+          return;
+        }
+        fb.innerHTML = "<div>" + v + " — too " + (v < puzzle.secret ? "low ↑" : "high ↓") + "</div>" + fb.innerHTML;
+        inp.value = ""; inp.focus();
+        if (tries >= MAX) {
+          fb.innerHTML = '<div class="bad">Out of tries — it was ' + puzzle.secret + "</div>" + fb.innerHTML;
+          ctx.submit({ score: 0, win: false, display: "✗" });
+        }
+      }
+      root.querySelector("#go").addEventListener("click", guess);
+      inp.addEventListener("keydown", function (e) { if (e.key === "Enter") guess(); });
+      setTimeout(function () { inp.focus(); }, 50);
+    },
+
+    // Points toward the OVERALL standings, from a recorded day result.
+    points: function (r) { return r.win ? r.score : 0; },     // 1..7 for a win
+
+    // Optional: short label for a result on the leaderboard (defaults to result.display).
+    label: function (r) { return r.display; },
+
+    // Optional: format the overall "Avg" column from the mean score.
+    formatAvg: function (mean) { return mean.toFixed(1); },
+
+    // Optional: one-line explainer under the Overall table.
+    scoreHelp: "Fewer guesses scores more (1 try = 7 pts). 🏆 = days you topped the board · 🔥 = current daily streak."
+  };
+  // ===================================================================
+  // ===== END GAME ADAPTER. Generic framework below — no edits. =======
+  // ===================================================================
+
+
+  // ---- dev-only webxdc stub (the real host injects its own) ----------
+  if (!window.webxdc) {
+    window.webxdc = (function () {
+      var KEY = "__daily_template_sim__", listener = null;
+      function read() { try { return JSON.parse(localStorage.getItem(KEY) || "[]"); } catch (e) { return []; } }
+      function write(a) { localStorage.setItem(KEY, JSON.stringify(a)); }
+      return {
+        selfAddr: "you@local.dev", selfName: "You",
+        sendUpdate: function (u) {
+          var all = read(), serial = all.length + 1;
+          all.push({ payload: u.payload, info: u.info, summary: u.summary, document: u.document, notify: u.notify, serial: serial, max_serial: serial });
+          all.forEach(function (it) { it.max_serial = serial; });
+          write(all);
+          if (listener) try { listener(all[all.length - 1]); } catch (e) { console.error(e); }
+        },
+        setUpdateListener: function (cb, serial) {
+          listener = cb; var all = read(), start = serial || 0;
+          return Promise.resolve().then(function () { for (var i = start; i < all.length; i++) cb(all[i]); });
+        },
+        // realtime channel stub — no peers in a single browser, so it's a no-op
+        joinRealtimeChannel: function () {
+          return { setListener: function () {}, send: function () {}, leave: function () {} };
+        }
+      };
+    })();
+  }
+
+  var $ = function (id) { return document.getElementById(id); };
+  var xdc = window.webxdc;
+
+  function mulberry32(a) {
+    return function () { a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  }
+
+  // ---- timezone-aware day numbering ----------------------------------
+  function dayNumberInTz(tz) {
+    try {
+      var o = {};
+      new Intl.DateTimeFormat("en-US", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" })
+        .formatToParts(new Date()).forEach(function (p) { o[p.type] = p.value; });
+      return Math.floor(Date.UTC(+o.year, +o.month - 1, +o.day) / 86400000);
+    } catch (e) { return Math.floor(Date.now() / 86400000); }
+  }
+  function msToNextReset(tz) {
+    try {
+      var o = {};
+      new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
+        .formatToParts(new Date()).forEach(function (p) { o[p.type] = p.value; });
+      return 86400000 - (((+o.hour % 24) * 3600 + (+o.minute) * 60 + (+o.second)) * 1000 + (Date.now() % 1000));
+    } catch (e) { var n = new Date(); return Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate() + 1) - n.getTime(); }
+  }
+  function tzOffsetLabel(tz) {
+    try {
+      var p = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "shortOffset" })
+        .formatToParts(new Date()).filter(function (x) { return x.type === "timeZoneName"; })[0];
+      return p ? p.value : "";
+    } catch (e) { return ""; }
+  }
+
+  // ---- state ---------------------------------------------------------
+  var TZ = null, TODAY = null, instanceSeed = null, firstDay = null, viewDay = null, gameStarted = false;
+  var results = {};                                   // addr -> { name, days: { [day]: result } }
+  var MINE_KEY = "daily-template-mine-v1";
+  var mine = loadMine();                              // my own results { days: { [day]: result } }
+
+  function loadMine() { try { return JSON.parse(localStorage.getItem(MINE_KEY)) || { days: {} }; } catch (e) { return { days: {} }; } }
+  function saveMine() { localStorage.setItem(MINE_KEY, JSON.stringify(mine)); }
+  function selfAddr() { return (xdc && xdc.selfAddr) || "self"; }
+  function selfName() { return (xdc && xdc.selfName) || "Someone"; }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function lbl(r) { return GAME.label ? GAME.label(r) : r.display; }
+
+  // ---- shared results + leaderboards ---------------------------------
+  function recordResult(addr, name, day, res) {
+    var r = results[addr] || (results[addr] = { name: name, days: {} });
+    if (name) r.name = name;
+    if (!r.days[day]) r.days[day] = res;              // first result only
+  }
+  function dailyRows(day) {
+    var rows = [];
+    for (var a in results) { var d = results[a].days[day]; if (d) rows.push({ addr: a, name: results[a].name, score: d.score, win: d.win, display: d.display }); }
+    rows.sort(function (x, y) { return y.score - x.score; });
+    return rows;
+  }
+  function playStreak(rec) { var s = 0, d = TODAY; if (!rec.days[d]) d--; while (d >= firstDay && rec.days[d]) { s++; d--; } return s; }
+  function overallRows() {
+    var allDays = {};
+    for (var a in results) for (var dy in results[a].days) allDays[dy] = 1;
+    var winnerOf = {};
+    Object.keys(allDays).forEach(function (dy) { var r = dailyRows(+dy); winnerOf[dy] = r.length ? r[0].addr : null; });
+    var rows = [];
+    for (var ad in results) {
+      var rec = results[ad], dys = Object.keys(rec.days); if (!dys.length) continue;
+      var wins = 0, pts = 0, sum = 0, tro = 0;
+      dys.forEach(function (dy) { var d = rec.days[dy]; if (d.win) wins++; pts += GAME.points(d); sum += d.score; if (winnerOf[dy] === ad) tro++; });
+      rows.push({ addr: ad, name: rec.name, played: dys.length, wins: wins, avg: sum / dys.length, trophies: tro, streak: playStreak(rec), pts: pts });
+    }
+    rows.sort(function (x, y) { return y.pts - x.pts || y.avg - x.avg || y.played - x.played; });
+    return rows;
+  }
+
+  // ---- labels / dates ------------------------------------------------
+  function puzzleIndex(day) { return day - firstDay + 1; }
+  function dayLabel(day) {
+    var dt = new Date(day * 86400000);
+    var s = dt.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+    return day === TODAY ? s + ' · <span class="today">today</span>' : s;
+  }
+
+  // ---- the puzzle for a day ------------------------------------------
+  function rngForDay(day) { return mulberry32((instanceSeed ^ Math.imul(day, 0x9E3779B1)) | 0); }
+
+  function goToDay(day) {
+    viewDay = Math.max(firstDay, Math.min(TODAY, day));
+    var puzzle = GAME.makePuzzle(rngForDay(viewDay), viewDay);
+    var stage = $("stage"); stage.innerHTML = "";
+    GAME.render(stage, puzzle, {
+      day: viewDay,
+      isToday: viewDay === TODAY,
+      playable: viewDay === TODAY && !mine.days[viewDay],
+      previous: mine.days[viewDay] || null,
+      submit: function (res) { submitResult(viewDay, res); },
+      toast: toast
+    });
+    refreshView();
+    renderDaily();
+  }
+  function refreshView() {
+    $("puzzleNo").textContent = "#" + puzzleIndex(viewDay);
+    $("dateLabel").innerHTML = dayLabel(viewDay);
+    $("navPrev").disabled = (viewDay <= firstDay);
+    $("navNext").disabled = (viewDay >= TODAY);
+  }
+  function submitResult(day, res) {
+    if (day !== TODAY || mine.days[day]) return;      // only today, once
+    mine.days[day] = res; saveMine();
+    broadcastResult(day, res);
+    goToDay(day);                                     // re-render read-only with the result
+  }
+
+  // ---- leaderboard rendering -----------------------------------------
+  function medal(i) { return i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : ""; }
+  function renderDaily() {
+    var rows = dailyRows(viewDay), me = selfAddr();
+    $("dailyDate").innerHTML = (viewDay === TODAY ? "Today" : dayLabel(viewDay)) + " · results";
+    $("lbCount").textContent = rows.length ? "(" + rows.length + ")" : "";
+    if (!rows.length) { $("lb").innerHTML = '<div class="lbempty">No results yet for this day.</div>'; return; }
+    $("lb").innerHTML = rows.map(function (r, i) {
+      var mineCls = r.addr === me ? " me" : "";
+      return '<div class="lbrow' + mineCls + '"><span class="rank">' + (medal(i) || (i + 1)) + '</span>' +
+        '<span class="nm">' + esc(r.name) + (mineCls ? " (you)" : "") + '</span>' +
+        '<span class="sc">' + esc(lbl(r)) + '</span></div>';
+    }).join("");
+  }
+  function renderOverall() {
+    var rows = overallRows(), me = selfAddr();
+    if (!rows.length) { $("overall").innerHTML = '<div class="lbempty">No results yet.</div>'; $("scoreHelp").textContent = ""; return; }
+    var html = '<table class="otable"><thead><tr><th class="l">#</th><th class="l">Player</th>' +
+      '<th>Won</th><th>Avg</th><th>🏆</th><th>🔥</th><th>Pts</th></tr></thead><tbody>';
+    rows.forEach(function (r, i) {
+      var avg = GAME.formatAvg ? GAME.formatAvg(r.avg) : r.avg.toFixed(1);
+      html += '<tr' + (r.addr === me ? ' class="me"' : "") + '>' +
+        '<td class="l">' + (i + 1) + '</td>' +
+        '<td class="l pnm">' + esc(r.name) + (r.addr === me ? " (you)" : "") + '</td>' +
+        '<td>' + r.wins + "/" + r.played + '</td>' +
+        '<td>' + avg + '</td>' +
+        '<td>' + (r.trophies || "·") + '</td>' +
+        '<td>' + (r.streak || "·") + '</td>' +
+        '<td class="pts">' + r.pts + '</td></tr>';
+    });
+    $("overall").innerHTML = html + "</tbody></table>";
+    $("scoreHelp").textContent = GAME.scoreHelp || "🏆 = days you topped the board · 🔥 = current daily streak.";
+  }
+  function overallOpen() { return $("overallScreen").classList.contains("show"); }
+  function refreshBoards() { renderDaily(); if (overallOpen()) renderOverall(); }
+
+  // ---- chat sharing: info (always) + notify (on overtaking #1) -------
+  function chatSummary(day) {
+    var d = dailyRows(day), o = overallRows(), s;
+    s = d.length ? (d[0].name + " · " + lbl(d[0]) + " · " + d.length + (d.length === 1 ? " player" : " players")) : "No results yet";
+    if (o.length) s += " | Overall: " + o[0].name + " (" + o[0].pts + " pts)";
+    return s;
+  }
+  function broadcastResult(day, res) {
+    var name = selfName(), addr = selfAddr();
+    var prior = dailyRows(day), leader = prior.length ? prior[0] : null;
+    var tookLead = leader && leader.addr !== addr && res.score > leader.score;
+    recordResult(addr, name, day, res); refreshBoards();
+    if (xdc && xdc.sendUpdate) {
+      var update = {
+        payload: { type: "result", day: day, addr: addr, name: name, score: res.score, win: res.win, display: res.display },
+        info: name + " " + (GAME.verb || "played") + " #" + puzzleIndex(day) + " — " + lbl(res),
+        document: "#" + puzzleIndex(day),
+        summary: chatSummary(day)
+      };
+      if (tookLead) update.notify = { "*": name + " took the lead on #" + puzzleIndex(day) + " — " + lbl(res) };
+      xdc.sendUpdate(update, "result-" + day);
+    }
+  }
+
+  // ---- updates -------------------------------------------------------
+  function onUpdate(u) {
+    var p = u && u.payload; if (!p) return;
+    if (p.type === "config") {
+      if (instanceSeed === null) startOnce(p.seed, p.startDay, p.tz);
+    } else if (p.type === "result") {
+      recordResult(p.addr, p.name, p.day, { score: p.score, win: p.win, display: p.display });
+      // Multi-device: if this is OUR OWN result synced from another device,
+      // adopt it locally so this device also shows the day as played and won't
+      // offer a replay (which would double-post to the chat).
+      var adopted = false;
+      if (p.addr === selfAddr() && !mine.days[p.day]) {
+        mine.days[p.day] = { score: p.score, win: p.win, display: p.display };
+        saveMine();
+        adopted = true;
+      }
+      if (gameStarted) {
+        if (adopted && p.day === viewDay) goToDay(viewDay);   // re-render now-played day
+        refreshBoards();
+      }
+    }
+  }
+
+  // ---- tabs / overall full screen ------------------------------------
+  function openOverall() {
+    $("ovPuzzleNo").textContent = $("puzzleNo").textContent;
+    renderOverall();
+    $("overallScreen").classList.add("show");
+    $("tabDaily").classList.remove("active"); $("tabOverall").classList.add("active");
+    window.scrollTo(0, 0);
+  }
+  function closeOverall() {
+    $("overallScreen").classList.remove("show");
+    $("tabOverall").classList.remove("active"); $("tabDaily").classList.add("active");
+  }
+  $("tabOverall").addEventListener("click", openOverall);
+  $("tabDaily").addEventListener("click", closeOverall);
+  $("ovTabDaily").addEventListener("click", closeOverall);
+  $("ovClose").addEventListener("click", closeOverall);
+  $("navPrev").addEventListener("click", function () { if (gameStarted) goToDay(viewDay - 1); });
+  $("navNext").addEventListener("click", function () { if (gameStarted) goToDay(viewDay + 1); });
+
+  // ---- help modal ----------------------------------------------------
+  function openOv(id) { $(id).classList.add("show"); }
+  function closeOv(el) { el.classList.remove("show"); }
+  document.querySelectorAll("[data-close]").forEach(function (b) { b.addEventListener("click", function () { closeOv(b.closest(".overlay")); }); });
+  document.querySelectorAll(".overlay").forEach(function (o) { o.addEventListener("click", function (e) { if (e.target === o) closeOv(o); }); });
+  $("btnHelp").addEventListener("click", function () { openOv("ovHelp"); });
+
+  // ---- first-opener setup (pick the reset timezone) ------------------
+  function buildTzOptions() {
+    var sel = $("tzSelect"), userTz = "UTC";
+    try { userTz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch (e) {}
+    var common = ["UTC", "America/Los_Angeles", "America/Denver", "America/Chicago", "America/New_York",
+      "America/Sao_Paulo", "Europe/London", "Europe/Paris", "Europe/Berlin", "Europe/Athens",
+      "Africa/Johannesburg", "Asia/Kolkata", "Asia/Dubai", "Asia/Shanghai", "Asia/Tokyo",
+      "Australia/Sydney", "Pacific/Auckland"];
+    function opt(tz, label) {
+      var off = tzOffsetLabel(tz), o = document.createElement("option");
+      o.value = tz; o.textContent = label + (off ? " (" + off + ")" : "");
+      sel.appendChild(o);
+    }
+    opt(userTz, "Your timezone — " + userTz.replace(/_/g, " ").split("/").pop());
+    common.forEach(function (tz) { if (tz !== userTz) opt(tz, tz.replace(/_/g, " ")); });
+    sel.value = userTz;
+  }
+  function updateTzHint() {
+    var tz = $("tzSelect").value;
+    var next = new Date(Date.now() + msToNextReset(tz));
+    var lab = next.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
+    $("tzHint").textContent = "Puzzles reset at midnight " + tz.replace(/_/g, " ") + " — next one " + lab + " your time.";
+  }
+  function showSetup() { if (!$("tzSelect").options.length) buildTzOptions(); updateTzHint(); $("setupScreen").classList.add("show"); }
+  function hideSetup() { $("setupScreen").classList.remove("show"); }
+  $("tzSelect").addEventListener("change", updateTzHint);
+  $("startDaily").addEventListener("click", function () {
+    var tz = $("tzSelect").value, seed = (Math.random() * 0x7fffffff) | 0, sd = dayNumberInTz(tz);
+    if (xdc && xdc.sendUpdate) xdc.sendUpdate({ payload: { type: "config", seed: seed, tz: tz, startDay: sd } }, "config");
+    startOnce(seed, sd, tz);
+  });
+
+  // ---- live presence (who's in the app right now) --------------------
+  // Uses the webxdc realtime channel: ephemeral, not persisted. Each client
+  // pings every few seconds; peers unseen for a while are pruned.
+  var presence = {}, rtChannel = null;
+  function startPresence() {
+    if (rtChannel || !xdc || !xdc.joinRealtimeChannel) return;
+    try { rtChannel = xdc.joinRealtimeChannel(); } catch (e) { return; }
+    var enc = new TextEncoder(), dec = new TextDecoder();
+    rtChannel.setListener(function (bytes) {
+      try {
+        var m = JSON.parse(dec.decode(bytes));
+        if (m && m.t === "p" && m.a !== selfAddr()) { presence[m.a] = { name: m.n, last: Date.now() }; renderPresence(); }
+      } catch (e) {}
+    });
+    function ping() { try { rtChannel.send(enc.encode(JSON.stringify({ t: "p", a: selfAddr(), n: selfName() }))); } catch (e) {} }
+    ping();
+    setInterval(ping, 4000);
+    setInterval(function () {
+      var now = Date.now(), changed = false;
+      for (var a in presence) if (now - presence[a].last > 12000) { delete presence[a]; changed = true; }
+      if (changed) renderPresence();
+    }, 3000);
+  }
+  function renderPresence() {
+    var el = $("presence"); if (!el) return;
+    var names = []; for (var a in presence) names.push(presence[a].name);
+    if (!names.length) { el.style.display = "none"; el.textContent = ""; return; }
+    el.style.display = "";
+    el.innerHTML = '<span class="dot"></span>' +
+      (names.length <= 3 ? esc(names.join(", ")) : (names.length + " others")) + " here now";
+  }
+
+  // ---- boot ----------------------------------------------------------
+  function startOnce(seed, startDay, tz) {
+    if (gameStarted) return;
+    gameStarted = true;
+    instanceSeed = seed; TZ = tz || "UTC"; TODAY = dayNumberInTz(TZ);
+    firstDay = Math.min(startDay == null ? TODAY : startDay, TODAY);
+    hideSetup();
+    goToDay(TODAY);
+    refreshBoards();
+    tick();
+    startPresence();
+  }
+
+  // app name / help text from the adapter
+  $("appName").textContent = $("ovName").textContent = $("setupName").textContent = $("setupTitle").textContent = GAME.name;
+  document.title = GAME.name;
+  $("helpTitle").textContent = "How to play";
+  $("helpBody").innerHTML = GAME.helpHTML || "";
+
+  if (xdc && xdc.setUpdateListener) {
+    xdc.setUpdateListener(onUpdate, 0).then(function () { if (instanceSeed === null) showSetup(); });
+  } else { showSetup(); }
+
+  // ---- countdown -----------------------------------------------------
+  function pad2(x) { return (x < 10 ? "0" : "") + x; }
+  function tick() {
+    if (!TZ) { $("cd").textContent = "—"; return; }
+    var ms = msToNextReset(TZ);
+    $("cd").textContent = pad2(Math.floor(ms / 3600000)) + ":" + pad2(Math.floor(ms % 3600000 / 60000)) + ":" + pad2(Math.floor(ms % 60000 / 1000));
+  }
+  setInterval(tick, 1000);
+
+  // ---- toast ---------------------------------------------------------
+  var toastT;
+  function toast(msg) {
+    var t = $("toast"); t.textContent = msg; t.classList.add("show");
+    clearTimeout(toastT); toastT = setTimeout(function () { t.classList.remove("show"); }, 2200);
+  }
+})();
+</script>
+</body>
+</html>
