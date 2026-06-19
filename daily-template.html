@@ -57,8 +57,9 @@
   .datelabel .today { color:var(--accent-dark); }
 
   /* live presence (who's here right now, via the realtime channel) */
-  .presence { text-align:center; font-size:12px; color:var(--muted); margin-bottom:8px; }
-  .presence .dot { display:inline-block; width:7px; height:7px; border-radius:50%; background:var(--good); margin-right:6px; vertical-align:middle; }
+  .presence { display:flex; align-items:center; gap:7px; font-size:12px; color:var(--muted); margin:14px 4px 2px; }
+  .presence .dot { width:8px; height:8px; border-radius:50%; background:var(--good); flex:0 0 8px; box-shadow:0 0 0 0 rgba(22,163,74,.5); animation:presence-pulse 1.8s ease-out infinite; }
+  @keyframes presence-pulse { 0% { box-shadow:0 0 0 0 rgba(22,163,74,.5); } 70% { box-shadow:0 0 0 9px rgba(22,163,74,0); } 100% { box-shadow:0 0 0 0 rgba(22,163,74,0); } }
 
   /* the GAME renders into here */
   .stage { background:var(--card); border-radius:16px; box-shadow:var(--shadow); padding:16px; min-height:160px; }
@@ -152,9 +153,9 @@
     <button class="navbtn" id="navNext" title="Next day">›</button>
   </div>
 
-  <div class="presence" id="presence" style="display:none"></div>
-
   <div class="stage" id="stage"></div>
+
+  <div class="presence" id="presence" style="display:none"></div>
 
   <div class="tabs">
     <button class="tab active" id="tabDaily">DAILY</button>
@@ -616,11 +617,16 @@
   }
   function renderPresence() {
     var el = $("presence"); if (!el) return;
-    var names = []; for (var a in presence) names.push(presence[a].name);
+    var names = []; for (var a in presence) names.push(esc(presence[a].name));
     if (!names.length) { el.style.display = "none"; el.textContent = ""; return; }
     el.style.display = "";
-    el.innerHTML = '<span class="dot"></span>' +
-      (names.length <= 3 ? esc(names.join(", ")) : (names.length + " others")) + " here now";
+    el.innerHTML = '<span class="dot"></span>' + presencePhrase(names);
+  }
+  function presencePhrase(n) {
+    if (n.length === 1) return n[0] + " is here";
+    if (n.length === 2) return n[0] + " and " + n[1] + " are here";
+    if (n.length === 3) return n[0] + ", " + n[1] + ", and " + n[2] + " are here";
+    return n[0] + ", " + n[1] + ", and " + (n.length - 2) + " others are here";
   }
 
   // ---- boot ----------------------------------------------------------
