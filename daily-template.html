@@ -219,6 +219,10 @@
 
 <div class="toast" id="toast"></div>
 
+<!-- Real webxdc API, served by the host (Delta Chat etc.). REQUIRED for chat
+     bubble document/summary + info/notify messages to actually be sent. In a
+     plain browser this 404s harmlessly and the inline dev stub below takes over. -->
+<script src="webxdc.js"></script>
 <script>
 (function () {
   "use strict";
@@ -310,7 +314,9 @@
   // ===================================================================
 
 
-  // ---- dev-only webxdc stub (the real host injects its own) ----------
+  // ---- dev-only webxdc stub ------------------------------------------
+  // Only used when webxdc.js did NOT load (i.e. opened in a plain browser).
+  // In a real host (Delta Chat) webxdc.js sets window.webxdc, so this is skipped.
   if (!window.webxdc) {
     window.webxdc = (function () {
       var KEY = "__daily_template_sim__", listener = null;
@@ -506,8 +512,15 @@
         document: "#" + puzzleIndex(day),
         summary: chatSummary(day)
       };
-      if (tookLead) update.notify = { "*": name + " took the lead on #" + puzzleIndex(day) + " — " + lbl(res) };
-      xdc.sendUpdate(update, "result-" + day);
+      // Taking the #1 spot REPLACES the silent info line with a celebratory one
+      // (so it shows in the chat) and fires a push notification. The `notify`
+      // field alone is only a push — the `info` field is what posts the message.
+      if (tookLead) {
+        var leadText = "🏆 " + name + " is now leading " + GAME.name + " #" + puzzleIndex(day) + " — " + lbl(res);
+        update.info = leadText;
+        update.notify = { "*": leadText };
+      }
+      xdc.sendUpdate(update, "");
     }
   }
 
